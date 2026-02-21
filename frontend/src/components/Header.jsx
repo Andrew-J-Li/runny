@@ -1,6 +1,6 @@
 import { Droplets, Factory, Zap } from 'lucide-react'
 
-export default function Header() {
+export default function Header({ children }) {
   return (
     <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
@@ -18,6 +18,7 @@ export default function Header() {
           </div>
         </div>
         <div className="flex items-center gap-4 text-sm text-slate-400">
+          {children}
           <div className="flex items-center gap-1.5">
             <Factory className="w-4 h-4" />
             <span>Factory Site Planner</span>

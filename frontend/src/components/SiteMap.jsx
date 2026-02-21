@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -69,7 +69,39 @@ function ResizeHandler() {
   return null
 }
 
-export default function SiteMap({ sites, selectedSite, analysis, onSelectSite }) {
+// Handle map clicks to place custom pins
+function ClickHandler({ onMapClick }) {
+  useMapEvents({
+    click(e) {
+      if (onMapClick) {
+        onMapClick(e.latlng.lat, e.latlng.lng)
+      }
+    },
+  })
+  return null
+}
+
+// Custom pin icon (different from factory icon)
+function createPinIcon(color = '#3b82f6', selected = false) {
+  const size = selected ? 36 : 28
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `<div style="
+      width: ${size}px;
+      height: ${size}px;
+      background: ${color};
+      border: 3px solid ${selected ? '#fff' : 'rgba(255,255,255,0.6)'};
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4)${selected ? ', 0 0 16px ' + color + '60' : ''};
+      transition: all 0.2s;
+    "></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size],
+  })
+}
+
+export default function SiteMap({ sites, customPins, selectedSite, analysis, onSelectSite, onMapClick }) {
   // Austin center
   const defaultCenter = [30.35, -97.65]
   const center = selectedSite
@@ -98,7 +130,9 @@ export default function SiteMap({ sites, selectedSite, analysis, onSelectSite })
       />
       <MapUpdater center={center} />
       <ResizeHandler />
+      <ClickHandler onMapClick={onMapClick} />
 
+      {/* Preset sites */}
       {sites.map(site => {
         const isSelected = selectedSite?.id === site.id
         const grade = siteGrades[site.id]
@@ -123,6 +157,39 @@ export default function SiteMap({ sites, selectedSite, analysis, onSelectSite })
                 {site.flood_zone && (
                   <span style={{ display: 'block', fontSize: 11, color: '#ef4444', marginTop: 4 }}>
                     ⚠️ Flood Zone
+                  </span>
+                )}
+              </div>
+            </Popup>
+          </Marker>
+        )
+      })}
+
+      {/* User-placed custom pins */}
+      {(customPins || []).map(pin => {
+        const isSelected = selectedSite?.id === pin.id
+        const grade = isSelected && analysis?.score ? analysis.score.grade : null
+        const color = grade ? GRADE_COLORS[grade] : '#3b82f6'
+
+        return (
+          <Marker
+            key={pin.id}
+            position={[pin.lat, pin.lng]}
+            icon={createPinIcon(color, isSelected)}
+            eventHandlers={{
+              click: () => onSelectSite(pin),
+            }}
+          >
+            <Popup>
+              <div style={{ color: '#1e293b', minWidth: 160 }}>
+                <strong style={{ fontSize: 14 }}>{pin.name || 'Custom Pin'}</strong>
+                <br />
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  {pin.lat.toFixed(3)}°N, {Math.abs(pin.lng).toFixed(3)}°W
+                </span>
+                {pin.soil_group && (
+                  <span style={{ display: 'block', fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                    Soil: {pin.soil_group} | Slope: {((pin.slope || 0) * 100).toFixed(1)}%
                   </span>
                 )}
               </div>
