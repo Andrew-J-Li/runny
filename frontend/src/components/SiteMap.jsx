@@ -55,6 +55,20 @@ function MapUpdater({ center }) {
   return null
 }
 
+// Tells Leaflet to recalculate size when the container resizes
+function ResizeHandler() {
+  const map = useMap()
+  useEffect(() => {
+    const container = map.getContainer()
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize()
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 export default function SiteMap({ sites, selectedSite, analysis, onSelectSite }) {
   // Austin center
   const defaultCenter = [30.35, -97.65]
@@ -83,6 +97,7 @@ export default function SiteMap({ sites, selectedSite, analysis, onSelectSite })
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
       <MapUpdater center={center} />
+      <ResizeHandler />
 
       {sites.map(site => {
         const isSelected = selectedSite?.id === site.id

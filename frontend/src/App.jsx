@@ -58,14 +58,14 @@ function App() {
   }, [fracImperv])
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="h-screen flex flex-col bg-slate-950 text-white overflow-hidden">
       <Header />
 
-      <main className="max-w-[1600px] mx-auto px-4 pb-8">
+      <main className="flex-1 overflow-y-auto max-w-[1600px] w-full mx-auto px-4 pb-4">
         {/* Top row: Map + Site Panel */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 mt-4">
           {/* Map */}
-          <div className="lg:col-span-2 bg-slate-900 rounded-xl border border-slate-800 overflow-hidden" style={{ height: '480px' }}>
+          <div className="lg:col-span-2 h-[clamp(350px,60vh,900px)] bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
             <SiteMap
               sites={sites}
               selectedSite={selectedSite}
@@ -74,7 +74,7 @@ function App() {
             />
           </div>
 
-          {/* Site Panel + Score */}
+          {/* Site Panel + Score — always show full content */}
           <div className="flex flex-col gap-4">
             <SitePanel
               site={selectedSite}
@@ -91,7 +91,7 @@ function App() {
 
         {/* Bottom row: Charts */}
         {analysis && !loading && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-900 rounded-xl border border-slate-800 p-5">
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <Droplets className="w-5 h-5 text-blue-400" />
