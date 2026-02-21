@@ -26,6 +26,20 @@ class SiteScore:
     details: str = ""
 
 
+def _compute_grade(overall: float) -> str:
+    """Convert an overall score (0-100) to a letter grade."""
+    if overall >= 80:
+        return "A"
+    elif overall >= 65:
+        return "B"
+    elif overall >= 50:
+        return "C"
+    elif overall >= 35:
+        return "D"
+    else:
+        return "F"
+
+
 def score_site(
     lat: float,
     lng: float,
@@ -108,16 +122,7 @@ def score_site(
     overall = max(0, min(100, overall))
 
     # Grade
-    if overall >= 80:
-        grade = "A"
-    elif overall >= 65:
-        grade = "B"
-    elif overall >= 50:
-        grade = "C"
-    elif overall >= 35:
-        grade = "D"
-    else:
-        grade = "F"
+    grade = _compute_grade(overall)
 
     # Compile per-storm comparison data for charts
     comparison = []

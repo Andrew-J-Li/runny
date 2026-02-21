@@ -1,41 +1,7 @@
-import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import { useEffect } from 'react'
+import { MapContainer, TileLayer, Rectangle, Popup, useMap, useMapEvents, Tooltip as LTooltip } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-
-// Fix default marker icons in React-Leaflet
-delete L.Icon.Default.prototype._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-})
-
-// Custom icons for different grades
-function createIcon(color, selected = false) {
-  const size = selected ? 40 : 30
-  return L.divIcon({
-    className: 'custom-marker',
-    html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
-      background: ${color};
-      border: 3px solid ${selected ? '#fff' : 'rgba(255,255,255,0.6)'};
-      border-radius: 50%;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4)${selected ? ', 0 0 20px ' + color + '80' : ''};
-      transition: all 0.2s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    ">
-      <svg width="${size * 0.5}" height="${size * 0.5}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-        <path d="M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 012-2h10a2 2 0 012 2v16"/>
-      </svg>
-    </div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  })
-}
 
 const GRADE_COLORS = {
   A: '#22c55e',
@@ -43,6 +9,15 @@ const GRADE_COLORS = {
   C: '#eab308',
   D: '#f97316',
   F: '#ef4444',
+}
+
+// Compute a rectangular bounds around a lat/lng
+// offset controls the visual size of the rectangle on the map
+function siteBounds(lat, lng, offset = 0.004) {
+  return [
+    [lat - offset * 0.6, lng - offset],
+    [lat + offset * 0.6, lng + offset],
+  ]
 }
 
 function MapUpdater({ center }) {
@@ -81,27 +56,7 @@ function ClickHandler({ onMapClick }) {
   return null
 }
 
-// Custom pin icon (different from factory icon)
-function createPinIcon(color = '#3b82f6', selected = false) {
-  const size = selected ? 36 : 28
-  return L.divIcon({
-    className: 'custom-marker',
-    html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
-      background: ${color};
-      border: 3px solid ${selected ? '#fff' : 'rgba(255,255,255,0.6)'};
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4)${selected ? ', 0 0 16px ' + color + '60' : ''};
-      transition: all 0.2s;
-    "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size],
-  })
-}
-
-export default function SiteMap({ sites, customPins, selectedSite, analysis, onSelectSite, onMapClick }) {
+export default function SiteMap({ sites, customPins, selectedSite, analysis, onSelectSite, onMapClick, geoError }) {
   // Austin center
   const defaultCenter = [30.35, -97.65]
   const center = selectedSite
@@ -111,7 +66,6 @@ export default function SiteMap({ sites, customPins, selectedSite, analysis, onS
   // Map site IDs to grades from analysis cache
   const siteGrades = {}
   if (analysis && analysis.score) {
-    // For now, we only have the selected site's grade in analysis
     if (selectedSite) {
       siteGrades[selectedSite.id] = analysis.score.grade
     }
@@ -132,21 +86,34 @@ export default function SiteMap({ sites, customPins, selectedSite, analysis, onS
       <ResizeHandler />
       <ClickHandler onMapClick={onMapClick} />
 
-      {/* Preset sites */}
+      {/* Preset sites as rectangles */}
       {sites.map(site => {
         const isSelected = selectedSite?.id === site.id
         const grade = siteGrades[site.id]
         const color = grade ? GRADE_COLORS[grade] : '#6366f1'
+        const bounds = siteBounds(site.lat, site.lng, isSelected ? 0.005 : 0.004)
 
         return (
-          <Marker
+          <Rectangle
             key={site.id}
-            position={[site.lat, site.lng]}
-            icon={createIcon(isSelected ? (GRADE_COLORS[grade] || '#3b82f6') : '#6366f1', isSelected)}
+            bounds={bounds}
+            pathOptions={{
+              color: isSelected ? '#ffffff' : color,
+              fillColor: color,
+              fillOpacity: isSelected ? 0.5 : 0.3,
+              weight: isSelected ? 3 : 2,
+              dashArray: isSelected ? null : '6 3',
+            }}
             eventHandlers={{
               click: () => onSelectSite(site),
             }}
           >
+            <LTooltip direction="top" offset={[0, -10]} permanent={isSelected}>
+              <span style={{ fontSize: 12, fontWeight: isSelected ? 600 : 400 }}>
+                {site.name}
+                {grade && ` (${grade})`}
+              </span>
+            </LTooltip>
             <Popup>
               <div style={{ color: '#1e293b', minWidth: 180 }}>
                 <strong style={{ fontSize: 14 }}>{site.name}</strong>
@@ -161,32 +128,52 @@ export default function SiteMap({ sites, customPins, selectedSite, analysis, onS
                 )}
               </div>
             </Popup>
-          </Marker>
+          </Rectangle>
         )
       })}
 
-      {/* User-placed custom pins */}
-      {(customPins || []).map(pin => {
+      {/* User-placed custom pins as rectangles */}
+      {(customPins || []).map((pin, idx) => {
         const isSelected = selectedSite?.id === pin.id
         const grade = isSelected && analysis?.score ? analysis.score.grade : null
         const color = grade ? GRADE_COLORS[grade] : '#3b82f6'
+        const hasError = geoError && isSelected
+        const bounds = siteBounds(pin.lat, pin.lng, isSelected ? 0.005 : 0.004)
 
         return (
-          <Marker
-            key={pin.id}
-            position={[pin.lat, pin.lng]}
-            icon={createPinIcon(color, isSelected)}
+          <Rectangle
+            key={pin.id || `pin-${idx}`}
+            bounds={bounds}
+            pathOptions={{
+              color: hasError ? '#ef4444' : isSelected ? '#ffffff' : color,
+              fillColor: hasError ? '#ef4444' : color,
+              fillOpacity: isSelected ? 0.5 : 0.3,
+              weight: isSelected ? 3 : 2,
+              dashArray: hasError ? '4 4' : isSelected ? null : '6 3',
+            }}
             eventHandlers={{
               click: () => onSelectSite(pin),
             }}
           >
+            <LTooltip direction="top" offset={[0, -10]}>
+              <span style={{ fontSize: 12 }}>
+                {pin.name || pin.label || 'Custom Site'}
+                {grade && ` (${grade})`}
+                {hasError && ' — Data unavailable'}
+              </span>
+            </LTooltip>
             <Popup>
               <div style={{ color: '#1e293b', minWidth: 160 }}>
-                <strong style={{ fontSize: 14 }}>{pin.name || 'Custom Pin'}</strong>
+                <strong style={{ fontSize: 14 }}>{pin.name || pin.label || 'Custom Pin'}</strong>
                 <br />
                 <span style={{ fontSize: 12, color: '#64748b' }}>
                   {pin.lat.toFixed(3)}°N, {Math.abs(pin.lng).toFixed(3)}°W
                 </span>
+                {hasError && (
+                  <span style={{ display: 'block', fontSize: 11, color: '#ef4444', marginTop: 4 }}>
+                    ⚠️ Could not fetch environmental data for this location
+                  </span>
+                )}
                 {pin.soil_group && (
                   <span style={{ display: 'block', fontSize: 11, color: '#64748b', marginTop: 2 }}>
                     Soil: {pin.soil_group} | Slope: {((pin.slope || 0) * 100).toFixed(1)}%
@@ -194,7 +181,7 @@ export default function SiteMap({ sites, customPins, selectedSite, analysis, onS
                 )}
               </div>
             </Popup>
-          </Marker>
+          </Rectangle>
         )
       })}
     </MapContainer>

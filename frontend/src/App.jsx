@@ -5,6 +5,7 @@ import ScoreCard from './components/ScoreCard'
 import ForecastChart from './components/ForecastChart'
 import StormComparison from './components/StormComparison'
 import SitePanel from './components/SitePanel'
+import SiteAsset from './components/SiteAsset'
 import FactorySelector from './components/FactorySelector'
 import GreenInfraPanel from './components/GreenInfraPanel'
 import CompliancePanel from './components/CompliancePanel'
@@ -43,6 +44,11 @@ function App() {
   // --- geodata loading ---
   const [geoLoading, setGeoLoading] = useState(false)
   const [geoData, setGeoData] = useState(null)
+  const [geoError, setGeoError] = useState(false)
+
+  // --- applied BMPs ---
+  const [appliedBmps, setAppliedBmps] = useState([])
+  const [applyingBmp, setApplyingBmp] = useState(null)
 
   // --- compliance → green infra linking ---
   const [activeComplianceCheck, setActiveComplianceCheck] = useState(null)
@@ -70,14 +76,29 @@ function App() {
 
   // --- handlers ---
 
-  const handleStartAnalysis = (lat, lng) => {
+  const handleStartAnalysis = (lat, lng, isPreset = false) => {
     setHomeLat(lat)
     setHomeLng(lng)
     setView('analysis')
-    // Place a custom pin and analyze it
-    const pin = { lat, lng, label: `Pin ${customPins.length + 1}` }
-    setCustomPins([pin])
-    runCustomAnalysis(lat, lng)
+    setAppliedBmps([])
+    setGeoError(false)
+    if (isPreset) {
+      // For preset cities: load nearby preset sites, no custom pin
+      setCustomPins([])
+      // Select the nearest preset site once sites are loaded
+      if (sites.length > 0) {
+        const nearest = sites.reduce((best, s) => {
+          const d = Math.hypot(s.lat - lat, s.lng - lng)
+          return d < best.d ? { site: s, d } : best
+        }, { site: sites[0], d: Infinity })
+        handleSelectSite(nearest.site)
+      }
+    } else {
+      // For custom map clicks: place a pin and analyze
+      const pin = { lat, lng, label: `Pin ${customPins.length + 1}` }
+      setCustomPins([pin])
+      runCustomAnalysis(lat, lng)
+    }
   }
 
   const handleBackHome = () => {
@@ -85,12 +106,16 @@ function App() {
     setAnalysis(null)
     setSelectedSite(null)
     setGeoData(null)
+    setGeoError(false)
     setCustomPins([])
+    setAppliedBmps([])
   }
 
   const handleSelectSite = useCallback((site) => {
     setSelectedSite(site)
     setLoading(true)
+    setAppliedBmps([])
+    setGeoError(false)
     fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,10 +136,11 @@ function App() {
       })
   }, [fracImperv, selectedFactory])
 
-  const runCustomAnalysis = useCallback((lat, lng) => {
+  const runCustomAnalysis = useCallback((lat, lng, bmps = []) => {
     setSelectedSite(null)
     setLoading(true)
     setGeoLoading(true)
+    setGeoError(false)
 
     // Fetch geodata first for display, then run full analysis
     fetch('/api/geodata', {
@@ -126,6 +152,10 @@ function App() {
       .then(geo => {
         setGeoData(geo)
         setGeoLoading(false)
+        // Check if critical geodata is N/A
+        if (!geo.soil_group || geo.soil_group === 'N/A') {
+          setGeoError(true)
+        }
         // Now run full analysis
         return fetch('/api/analyze', {
           method: 'POST',
@@ -139,6 +169,7 @@ function App() {
             near_water: geo.near_water,
             frac_imperv: fracImperv,
             factory_type: selectedFactory,
+            applied_bmps: bmps.length > 0 ? bmps : undefined,
           }),
         })
       })
@@ -151,12 +182,14 @@ function App() {
         console.error('Analysis failed:', err)
         setLoading(false)
         setGeoLoading(false)
+        setGeoError(true)
       })
   }, [fracImperv, selectedFactory])
 
   const handleMapClick = (lat, lng) => {
     const pin = { lat, lng, label: `Pin ${customPins.length + 1}` }
     setCustomPins(prev => [...prev, pin])
+    setAppliedBmps([])
     runCustomAnalysis(lat, lng)
   }
 
@@ -167,9 +200,82 @@ function App() {
       handleSelectSite(selectedSite)
     } else if (customPins.length > 0) {
       const last = customPins[customPins.length - 1]
-      runCustomAnalysis(last.lat, last.lng)
+      runCustomAnalysis(last.lat, last.lng, appliedBmps)
     }
   }, [fracImperv, selectedFactory])
+
+  // --- BMP apply / remove handlers ---
+  const reAnalyzeWithBmps = useCallback((bmps) => {
+    if (selectedSite) {
+      setLoading(true)
+      fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          site_id: selectedSite.id,
+          frac_imperv: fracImperv,
+          factory_type: selectedFactory,
+          applied_bmps: bmps.length > 0 ? bmps : undefined,
+        }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          setAnalysis(data)
+          setLoading(false)
+          setApplyingBmp(null)
+        })
+        .catch(err => {
+          console.error('Re-analysis failed:', err)
+          setLoading(false)
+          setApplyingBmp(null)
+        })
+    } else if (customPins.length > 0) {
+      const last = customPins[customPins.length - 1]
+      setLoading(true)
+      setGeoLoading(false) // Skip geodata refetch on BMP toggle
+      const geo = geoData || {}
+      fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: last.lat,
+          lng: last.lng,
+          soil_group: geo.soil_group,
+          slope: geo.slope,
+          flood_zone: geo.flood_zone,
+          near_water: geo.near_water,
+          frac_imperv: fracImperv,
+          factory_type: selectedFactory,
+          applied_bmps: bmps.length > 0 ? bmps : undefined,
+        }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          setAnalysis(data)
+          setLoading(false)
+          setApplyingBmp(null)
+        })
+        .catch(err => {
+          console.error('Re-analysis failed:', err)
+          setLoading(false)
+          setApplyingBmp(null)
+        })
+    }
+  }, [selectedSite, customPins, geoData, fracImperv, selectedFactory])
+
+  const handleApplyBmp = (bmpId) => {
+    setApplyingBmp(bmpId)
+    const next = [...appliedBmps, bmpId]
+    setAppliedBmps(next)
+    reAnalyzeWithBmps(next)
+  }
+
+  const handleRemoveBmp = (bmpId) => {
+    setApplyingBmp(bmpId)
+    const next = appliedBmps.filter(id => id !== bmpId)
+    setAppliedBmps(next)
+    reAnalyzeWithBmps(next)
+  }
 
   const handleExportPDF = async () => {
     if (!analysis) return
@@ -193,7 +299,7 @@ function App() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'runny-report.pdf'
+      a.download = 'runny-swppp-report.pdf'
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -235,6 +341,12 @@ function App() {
     setActiveComplianceCheck(null)
   }, [analysis])
 
+  // Also clear applied BMPs state when we switch to a different site
+  useEffect(() => {
+    setAppliedBmps([])
+    setApplyingBmp(null)
+  }, [selectedSite])
+
   // =============== HOME SCREEN ===============
   if (view === 'home') {
     return <HomeScreen onStartAnalysis={handleStartAnalysis} />
@@ -251,7 +363,7 @@ function App() {
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 cursor-pointer"
           >
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-            {exporting ? 'Generating…' : 'Export PDF'}
+            {exporting ? 'Generating…' : 'Export SWPPP'}
           </button>
         )}
       </Header>
@@ -268,6 +380,7 @@ function App() {
               analysis={analysis}
               onSelectSite={handleSelectSite}
               onMapClick={handleMapClick}
+              geoError={geoError}
             />
           </div>
 
@@ -280,7 +393,17 @@ function App() {
             />
 
             {/* Geodata summary for custom pins */}
-            {geoData && !selectedSite && (
+            {geoError && !selectedSite && (
+              <div className="bg-red-950/30 rounded-xl border border-red-800/50 p-4">
+                <h3 className="text-sm font-semibold text-red-300 mb-2 flex items-center gap-2">
+                  ⚠️ Data Unavailable
+                </h3>
+                <p className="text-xs text-red-400">
+                  Could not fetch environmental data for this location. The site may be outside the coverage area of USDA/NOAA/FEMA/USGS data services. Try selecting a location within the contiguous US.
+                </p>
+              </div>
+            )}
+            {geoData && !selectedSite && !geoError && (
               <div className="bg-slate-900 rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -334,6 +457,14 @@ function App() {
             {analysis && !loading && (
               <ScoreCard score={analysis.score} />
             )}
+
+            {/* Isometric factory asset */}
+            {analysis && !loading && (
+              <SiteAsset
+                factoryType={selectedFactory}
+                siteName={analysis.site_name || 'Custom Site'}
+              />
+            )}
           </div>
         </div>
 
@@ -363,6 +494,10 @@ function App() {
               <GreenInfraPanel
                 recommendations={analysis.green_infra}
                 highlightedBmps={highlightedBmps}
+                appliedBmps={appliedBmps}
+                onApplyBmp={handleApplyBmp}
+                onRemoveBmp={handleRemoveBmp}
+                applyingBmp={applyingBmp}
               />
             )}
             {analysis.compliance && (
@@ -378,9 +513,9 @@ function App() {
           </div>
         )}
 
-        {/* Optimizer row */}
+        {/* Optimizer — full width */}
         {analysis && !loading && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <div className="mb-4">
             <OptimizerPanel
               onRunOptimize={handleRunOptimize}
               siteReady={!!analysis}

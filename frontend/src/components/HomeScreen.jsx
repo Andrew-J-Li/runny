@@ -25,8 +25,8 @@ const PRESETS = [
 export default function HomeScreen({ onStartAnalysis }) {
   const [hoveredPreset, setHoveredPreset] = useState(null)
 
-  const handleClick = (lat, lng) => {
-    onStartAnalysis(lat, lng)
+  const handleClick = (lat, lng, isPreset = false) => {
+    onStartAnalysis(lat, lng, isPreset)
   }
 
   return (
@@ -60,7 +60,7 @@ export default function HomeScreen({ onStartAnalysis }) {
             {PRESETS.map(p => (
               <button
                 key={p.name}
-                onClick={() => handleClick(p.lat, p.lng)}
+                onClick={() => handleClick(p.lat, p.lng, true)}
                 onMouseEnter={() => setHoveredPreset(p.name)}
                 onMouseLeave={() => setHoveredPreset(null)}
                 className={`

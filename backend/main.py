@@ -49,6 +49,7 @@ class AnalyzeRequest(BaseModel):
     flood_zone: Optional[bool] = None     # None = auto-fetch from FEMA
     near_water: Optional[bool] = None
     factory_type: str = "light_manufacturing"
+    applied_bmps: Optional[List[str]] = None  # BMP IDs the user has chosen to apply
 
 
 class GeoLookupRequest(BaseModel):
@@ -67,6 +68,7 @@ class ReportRequest(BaseModel):
     slope: Optional[float] = None
     flood_zone: Optional[bool] = None
     near_water: Optional[bool] = None
+    applied_bmps: Optional[List[str]] = None
 
 
 class OptimizeRequest(BaseModel):
@@ -222,12 +224,39 @@ def api_analyze(req: AnalyzeRequest):
         near_water=p["near_water"],
     )
 
+    # If user has applied BMPs, adjust runoff/peak metrics
+    applied_bmps = req.applied_bmps or []
+    runoff_inc = analysis["score"]["runoff_increase_pct"]
+    peak_inc = analysis["score"]["peak_flow_increase_pct"]
+
+    if applied_bmps:
+        from .engine.optimizer import _apply_bmp_reductions
+        reductions = _apply_bmp_reductions(
+            runoff_inc, peak_inc, p["frac_imperv"], p["soil_group"], tuple(applied_bmps),
+        )
+        runoff_inc = reductions["runoff_increase_pct"]
+        peak_inc = reductions["peak_increase_pct"]
+        # Recompute score with adjusted values
+        from .engine.scoring import _compute_grade
+        soil_scores = {"A": 90, "B": 75, "C": 50, "D": 25}
+        soil_s = soil_scores.get(p["soil_group"], 50)
+        runoff_score = max(0, 100 - runoff_inc * 0.5)
+        peak_score = max(0, 100 - peak_inc * 0.3)
+        flood_s = analysis["score"]["flood_risk"]
+        overall = runoff_score * 0.30 + peak_score * 0.25 + soil_s * 0.25 + flood_s * 0.20
+        overall = max(0, min(100, overall))
+        grade = _compute_grade(overall)
+        analysis["score"]["overall"] = round(overall, 1)
+        analysis["score"]["grade"] = grade
+        analysis["score"]["runoff_increase_pct"] = round(runoff_inc, 1)
+        analysis["score"]["peak_flow_increase_pct"] = round(peak_inc, 1)
+
     green = recommend_green_infra(
         soil_group=p["soil_group"],
         site_area_sqft=p["area_sqft"],
         frac_imperv=p["frac_imperv"],
-        runoff_increase_pct=analysis["score"]["runoff_increase_pct"],
-        peak_increase_pct=analysis["score"]["peak_flow_increase_pct"],
+        runoff_increase_pct=runoff_inc,
+        peak_increase_pct=peak_inc,
         flood_zone=p["flood_zone"],
     )
 
@@ -237,8 +266,8 @@ def api_analyze(req: AnalyzeRequest):
         soil_group=p["soil_group"],
         flood_zone=p["flood_zone"],
         near_water=p["near_water"],
-        runoff_increase_pct=analysis["score"]["runoff_increase_pct"],
-        peak_increase_pct=analysis["score"]["peak_flow_increase_pct"],
+        runoff_increase_pct=runoff_inc,
+        peak_increase_pct=peak_inc,
         factory_type_id=p["factory_type"],
         comparison=analysis.get("comparison"),
     )
@@ -252,8 +281,8 @@ def api_analyze(req: AnalyzeRequest):
         near_water=p["near_water"],
         factory_type=p["factory"],
         green_infra=green,
-        runoff_increase_pct=analysis["score"]["runoff_increase_pct"],
-        peak_increase_pct=analysis["score"]["peak_flow_increase_pct"],
+        runoff_increase_pct=runoff_inc,
+        peak_increase_pct=peak_inc,
     )
 
     return {
@@ -263,6 +292,7 @@ def api_analyze(req: AnalyzeRequest):
         "costs": costs,
         "site_name": p["site_name"],
         "factory_type": p["factory"],
+        "applied_bmps": applied_bmps,
     }
 
 
@@ -341,6 +371,7 @@ def api_generate_report(req: ReportRequest):
         flood_zone=req.flood_zone,
         near_water=req.near_water,
         factory_type=req.factory_type,
+        applied_bmps=req.applied_bmps,
     )
     result = api_analyze(analyze_req)
 
