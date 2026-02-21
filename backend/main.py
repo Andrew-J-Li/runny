@@ -19,6 +19,7 @@ from .engine.green_infra import recommend_green_infra
 from .engine.compliance import check_compliance
 from .engine.costs import compute_cost_benefit
 from .engine.report import generate_report
+from .engine.optimizer import run_optimization
 from .data.sites import get_all_sites, get_site
 from .data.factories import get_factory_types, get_factory_type
 
@@ -66,6 +67,17 @@ class ReportRequest(BaseModel):
     slope: Optional[float] = None
     flood_zone: Optional[bool] = None
     near_water: Optional[bool] = None
+
+
+class OptimizeRequest(BaseModel):
+    lat: float
+    lng: float
+    soil_group: Optional[str] = None
+    area_sqft: Optional[float] = None
+    slope: Optional[float] = None
+    flood_zone: Optional[bool] = None
+    near_water: Optional[bool] = None
+    factory_type: str = "light_manufacturing"
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +281,45 @@ def api_analyze_get(
         factory_type=factory_type,
     )
     return api_analyze(req)
+
+
+# ---------------------------------------------------------------------------
+# API Endpoints — Optimizer (Pareto frontier)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/optimize")
+def api_optimize(req: OptimizeRequest):
+    """
+    Sweep the design space and find Pareto-optimal configurations
+    of environmental score vs. 20-year cost.
+    """
+    ft = get_factory_type(req.factory_type) or get_factory_type("light_manufacturing")
+
+    # Resolve geo data if needed
+    lat, lng = req.lat, req.lng
+    soil_group = req.soil_group
+    slope = req.slope
+    flood_zone = req.flood_zone
+    near_water = req.near_water
+    area_sqft = req.area_sqft or ft["default_area_sqft"]
+
+    if soil_group is None or slope is None or flood_zone is None:
+        geo = fetch_site_data(lat, lng)
+        soil_group = soil_group or geo["soil_group"]
+        slope = slope if slope is not None else geo["slope"]
+        flood_zone = flood_zone if flood_zone is not None else geo["flood_zone"]
+        near_water = near_water if near_water is not None else geo["near_water"]
+
+    result = run_optimization(
+        lat=lat, lng=lng,
+        soil_group=soil_group,
+        site_area_sqft=area_sqft,
+        slope=slope,
+        flood_zone=flood_zone,
+        near_water=near_water,
+        factory_type_id=req.factory_type,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

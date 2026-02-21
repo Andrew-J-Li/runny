@@ -9,9 +9,10 @@ import FactorySelector from './components/FactorySelector'
 import GreenInfraPanel from './components/GreenInfraPanel'
 import CompliancePanel from './components/CompliancePanel'
 import CostPanel from './components/CostPanel'
+import OptimizerPanel from './components/OptimizerPanel'
 import Header from './components/Header'
 import {
-  Droplets, ArrowLeft, FileDown, Loader2
+  Droplets, FileDown, Loader2
 } from 'lucide-react'
 
 function App() {
@@ -42,6 +43,10 @@ function App() {
   // --- geodata loading ---
   const [geoLoading, setGeoLoading] = useState(false)
   const [geoData, setGeoData] = useState(null)
+
+  // --- compliance → green infra linking ---
+  const [activeComplianceCheck, setActiveComplianceCheck] = useState(null)
+  const highlightedBmps = activeComplianceCheck?.remediation_bmps || []
 
   // Fetch preset sites + factory types on mount
   useEffect(() => {
@@ -198,6 +203,38 @@ function App() {
     }
   }
 
+  const handleRunOptimize = async () => {
+    const lastPin = customPins.length > 0 ? customPins[customPins.length - 1] : null
+    const body = {
+      lat: selectedSite?.lat || lastPin?.lat || homeLat,
+      lng: selectedSite?.lng || lastPin?.lng || homeLng,
+      factory_type: selectedFactory,
+      ...(selectedSite ? {
+        soil_group: selectedSite.soil_group,
+        slope: selectedSite.slope,
+        flood_zone: selectedSite.flood_zone,
+        near_water: selectedSite.near_water,
+      } : geoData ? {
+        soil_group: geoData.soil_group,
+        slope: geoData.slope,
+        flood_zone: geoData.flood_zone,
+        near_water: geoData.near_water,
+      } : {}),
+    }
+    const resp = await fetch('/api/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) throw new Error('Optimization failed')
+    return resp.json()
+  }
+
+  // Clear compliance selection when analysis changes
+  useEffect(() => {
+    setActiveComplianceCheck(null)
+  }, [analysis])
+
   // =============== HOME SCREEN ===============
   if (view === 'home') {
     return <HomeScreen onStartAnalysis={handleStartAnalysis} />
@@ -206,26 +243,17 @@ function App() {
   // =============== ANALYSIS VIEW ===============
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-white overflow-hidden">
-      <Header>
-        <div className="flex items-center gap-3">
+      <Header onLogoClick={handleBackHome}>
+        {analysis && !loading && (
           <button
-            onClick={handleBackHome}
-            className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors cursor-pointer"
+            onClick={handleExportPDF}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Home
+            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            {exporting ? 'Generating…' : 'Export PDF'}
           </button>
-          {analysis && !loading && (
-            <button
-              onClick={handleExportPDF}
-              disabled={exporting}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-50 cursor-pointer"
-            >
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
-              {exporting ? 'Generating…' : 'Export PDF'}
-            </button>
-          )}
-        </div>
+        )}
       </Header>
 
       <main className="flex-1 overflow-y-auto max-w-[1600px] w-full mx-auto px-4 pb-4">
@@ -254,7 +282,10 @@ function App() {
             {/* Geodata summary for custom pins */}
             {geoData && !selectedSite && (
               <div className="bg-slate-900 rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-semibold text-slate-300 mb-2">Site Data (Live API)</h3>
+                <h3 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Site Data
+                </h3>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-slate-800/50 rounded-lg p-2">
                     <div className="text-slate-500">Soil Group</div>
@@ -292,6 +323,8 @@ function App() {
 
             <SitePanel
               site={selectedSite}
+              customPin={customPins.length > 0 ? customPins[customPins.length - 1] : null}
+              geoData={geoData}
               analysis={analysis}
               loading={loading}
               fracImperv={fracImperv}
@@ -323,14 +356,21 @@ function App() {
           </div>
         )}
 
-        {/* New analysis panels row */}
+        {/* Analysis panels row */}
         {analysis && !loading && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
             {analysis.green_infra && (
-              <GreenInfraPanel recommendations={analysis.green_infra} />
+              <GreenInfraPanel
+                recommendations={analysis.green_infra}
+                highlightedBmps={highlightedBmps}
+              />
             )}
             {analysis.compliance && (
-              <CompliancePanel compliance={analysis.compliance} />
+              <CompliancePanel
+                compliance={analysis.compliance}
+                activeCheckId={activeComplianceCheck?.id}
+                onCheckClick={(check) => setActiveComplianceCheck(check)}
+              />
             )}
             {analysis.costs && (
               <CostPanel costs={analysis.costs} />
@@ -338,14 +378,53 @@ function App() {
           </div>
         )}
 
-        {/* Loading state */}
-        {loading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-            <span className="ml-4 text-slate-400">
-              {geoLoading ? 'Fetching site data from USDA, NOAA, FEMA, USGS…' : 'Running SWMM simulation…'}
-            </span>
+        {/* Optimizer row */}
+        {analysis && !loading && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+            <OptimizerPanel
+              onRunOptimize={handleRunOptimize}
+              siteReady={!!analysis}
+            />
           </div>
+        )}
+
+        {/* Water-flow loading state */}
+        {loading && (
+          <>
+            {/* Full-width water bar across the top */}
+            <div className="fixed top-[57px] left-0 right-0 z-[60] water-bar" />
+
+            <div className="flex flex-col items-center justify-center py-20 gap-6">
+              {/* Animated water loader pill */}
+              <div className="water-loader w-48 h-3 bg-slate-800/60">
+                <div className="wave wave-1" />
+                <div className="wave wave-2" />
+                <div className="wave wave-3" />
+              </div>
+
+              {/* Droplet icon with bob */}
+              <div className="relative">
+                <div style={{ animation: 'water-rise 2s ease-in-out infinite' }}>
+                  <Droplets className="w-10 h-10 text-blue-400" />
+                </div>
+                {/* Bubbles */}
+                <div className="water-droplet" style={{ left: '8px', bottom: '-4px', animationDelay: '0s' }} />
+                <div className="water-droplet" style={{ left: '22px', bottom: '-2px', animationDelay: '0.5s' }} />
+                <div className="water-droplet" style={{ left: '36px', bottom: '-6px', animationDelay: '1s' }} />
+              </div>
+
+              <div className="text-center">
+                <p className="text-slate-300 font-medium">
+                  {geoLoading ? 'Fetching site data…' : 'Running SWMM simulation…'}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {geoLoading
+                    ? 'Querying USDA, NOAA, FEMA & USGS APIs'
+                    : 'Computing runoff, compliance & cost analysis'}
+                </p>
+              </div>
+            </div>
+          </>
         )}
       </main>
     </div>

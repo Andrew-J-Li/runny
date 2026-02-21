@@ -57,6 +57,7 @@ def check_compliance(
             f"Site is {site_acres:.1f} acres. CGP may not be required (< {CGP_THRESHOLD_ACRES} acre)."
         ),
         "action": "File NOI (Notice of Intent) with EPA before construction begins." if cgp_required else None,
+        "remediation_bmps": [],
     })
 
     # ── 2. Post-construction stormwater management ─────────────────
@@ -85,6 +86,7 @@ def check_compliance(
             None if channel_ok else
             "Install detention/retention to attenuate 2-year post-development peak to pre-development levels."
         ),
+        "remediation_bmps": [] if channel_ok else ["detention_pond", "bioretention", "swale"],
     })
 
     # ── 3. Water quality treatment ─────────────────────────────────
@@ -98,6 +100,7 @@ def check_compliance(
             f"Site has {frac_imperv*100:.0f}% impervious cover. "
             f"Must treat first {WATER_QUALITY_VOLUME_IN}\" of rainfall from impervious surfaces."
         ),
+        "remediation_bmps": [] if wqv_ok else ["bioretention", "permeable_pavement", "green_roof"],
         "action": (
             None if wqv_ok else
             "Provide bioretention, permeable pavement, or other BMP to treat water quality volume."
@@ -121,6 +124,7 @@ def check_compliance(
             "Obtain floodplain development permit. Elevate structures above BFE. "
             "Provide compensatory floodplain storage."
         ),
+        "remediation_bmps": [] if flood_ok else ["detention_pond", "bioretention"],
     })
 
     # ── 5. TPDES (Texas) stormwater permit ─────────────────────────
@@ -136,6 +140,7 @@ def check_compliance(
                 f">{TPDES_IMPERVIOUS_THRESHOLD*100:.0f}% impervious cover or ≥5 acres."
             ),
             "action": "File with TCEQ for Multi-Sector General Permit (MSGP) coverage." if tpdes_required else None,
+            "remediation_bmps": [],
         })
 
         # TSS removal
@@ -149,6 +154,7 @@ def check_compliance(
                 "post-construction stormwater treatment."
             ),
             "action": "Design BMPs to meet 80% TSS removal (bioretention, sand filter, or wet pond).",
+            "remediation_bmps": ["bioretention", "swale", "detention_pond"],
         })
 
     # ── 6. Endangered species / waterway buffers ───────────────────
@@ -163,6 +169,7 @@ def check_compliance(
                 "riparian buffer zones."
             ),
             "action": "Verify setback requirements with local jurisdiction. Maintain vegetated buffer.",
+            "remediation_bmps": ["swale", "bioretention"],
         })
         warnings.append("Proximity to waterways may trigger additional environmental review.")
 
@@ -180,6 +187,7 @@ def check_compliance(
                 "Spill Prevention, Control, and Countermeasure (SPCC) plan required."
             ),
             "action": "Develop SPCC plan. Install secondary containment for all chemical storage.",
+            "remediation_bmps": ["detention_pond"],
         })
 
     # ── Overall compliance status ──────────────────────────────────
